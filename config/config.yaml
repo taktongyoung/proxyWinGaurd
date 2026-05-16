@@ -1,0 +1,43 @@
+proxy:
+  host: "0.0.0.0"
+  port: 8080
+  socks5_port: 1080
+  auth:
+    enabled: false
+    username: ""
+    password: ""
+
+vpn:
+  type: "wireguard"
+  config_file: "wg0.conf"
+  interface: "wg0"
+  auto_connect: true
+
+ai:
+  claude:
+    api_key: "${ANTHROPIC_API_KEY}"
+    model: "claude-sonnet-4-6"
+    enabled: true
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    enabled: true
+
+plugins:
+  traffic_logger:
+    enabled: true
+    log_file: "logs/traffic.log"
+  content_filter:
+    enabled: false
+    blocked_domains: []
+  ai_analyzer:
+    enabled: true
+    analyze_every_n_requests: 100
+  codex_review:
+    enabled: true
+    max_body_size: 60000
+    min_lines: 5
+
+mcp:
+  enabled: true
+  transport: "stdio"
