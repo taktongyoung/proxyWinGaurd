@@ -200,6 +200,43 @@ class TestRebuildResponse:
 
 
 # ---------------------------------------------------------------------------
+# Bug 2b — _pipe_remaining_body streams oversized POST body
+# ---------------------------------------------------------------------------
+
+class TestPipeRemainingBody:
+    @pytest.mark.asyncio
+    async def test_no_content_length_is_noop(self):
+        reader = _make_stream_reader(b"leftover")
+        writer = _FakeWriter()
+        raw_head = b"POST / HTTP/1.1\r\n\r\n"
+        await ProxyHandler._pipe_remaining_body(reader, writer, {}, raw_head)
+        assert writer.written == b""
+
+    @pytest.mark.asyncio
+    async def test_body_already_in_raw_head(self):
+        body = b"hello"
+        raw_head = b"POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello"
+        reader = _make_stream_reader(b"")  # nothing left to read
+        writer = _FakeWriter()
+        await ProxyHandler._pipe_remaining_body(
+            reader, writer, {"content-length": "5"}, raw_head
+        )
+        assert writer.written == b""
+
+    @pytest.mark.asyncio
+    async def test_remaining_body_streamed(self):
+        # raw_head captured only 3 of 8 body bytes
+        raw_head = b"POST / HTTP/1.1\r\nContent-Length: 8\r\n\r\nabc"
+        remaining = b"defgh"
+        reader = _make_stream_reader(remaining)
+        writer = _FakeWriter()
+        await ProxyHandler._pipe_remaining_body(
+            reader, writer, {"content-length": "8"}, raw_head
+        )
+        assert writer.written == b"defgh"
+
+
+# ---------------------------------------------------------------------------
 # Bug 4 — SOCKS5 subnegotiation version check (RFC 1929)
 # ---------------------------------------------------------------------------
 

@@ -77,6 +77,11 @@ class VPNManager:
         if self._adapter.is_connected:
             await self._adapter.disconnect()
 
+        if self._vpn_type == "ssh":
+            from proxy import tunnel as _tunnel
+            _tunnel.upstream_socks5 = None
+            log.info("Upstream SOCKS5 cleared")
+
     async def get_status(self) -> dict[str, Any]:
         return await self._adapter.get_status()
 
@@ -85,4 +90,13 @@ class VPNManager:
             await asyncio.sleep(30)
             if not self._adapter.is_connected:
                 log.warning("[warn]VPN disconnected, attempting reconnect...[/warn]")
-                await self._adapter.connect()
+                if self._vpn_type == "ssh":
+                    from proxy import tunnel as _tunnel
+                    _tunnel.upstream_socks5 = None
+                ok = await self._adapter.connect()
+                if ok and self._vpn_type == "ssh":
+                    from proxy import tunnel as _tunnel
+                    from .ssh_tunnel import SSHTunnel
+                    adapter: SSHTunnel = self._adapter  # type: ignore[assignment]
+                    _tunnel.upstream_socks5 = ("127.0.0.1", adapter._local_port)
+                    log.info(f"Upstream SOCKS5 restored to 127.0.0.1:{adapter._local_port}")

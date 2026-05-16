@@ -107,6 +107,9 @@ class ProxyHandler:
             remote_writer.write(rebuilt)
             await remote_writer.drain()
 
+            # Forward any remaining request body not captured in the initial read
+            await self._pipe_remaining_body(reader, remote_writer, headers, raw_head)
+
             # Bug 1 fix: read full response, not just first 65 KB
             response_data = await self._read_full_response(remote_reader)
             status_code, resp_headers, resp_body = self._parse_response(response_data)
@@ -452,6 +455,31 @@ class ProxyHandler:
             return status_code, headers, body
         except Exception:
             return 200, {}, data
+
+    @staticmethod
+    async def _pipe_remaining_body(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        headers: dict[str, str],
+        raw_head: bytes,
+    ) -> None:
+        """Stream request body bytes that didn't fit in the initial raw_head read."""
+        try:
+            content_length = int(headers.get("content-length", 0))
+        except ValueError:
+            return
+        if content_length <= 0:
+            return
+        header_end = raw_head.find(b"\r\n\r\n")
+        already_sent = len(raw_head) - (header_end + 4) if header_end != -1 else 0
+        remaining = content_length - already_sent
+        while remaining > 0:
+            chunk = await reader.read(min(remaining, 65536))
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+            remaining -= len(chunk)
 
     @staticmethod
     def _rebuild_request(method: str, path: str, headers: dict[str, str], raw: bytes) -> bytes:
