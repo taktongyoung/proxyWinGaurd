@@ -23,8 +23,27 @@ class PPTPAdapter:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._connect_sync)
 
+    def _ensure_profile(self) -> None:
+        """Create the Windows VPN connection profile if it doesn't exist."""
+        check = subprocess.run(
+            ["powershell", "-Command",
+             f"(Get-VpnConnection -Name '{self._name}' -ErrorAction SilentlyContinue) -ne $null"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if check.stdout.strip().lower() == "true":
+            return
+        log.info(f"Creating PPTP VPN profile: {self._name}")
+        subprocess.run(
+            ["powershell", "-Command",
+             f"Add-VpnConnection -Name '{self._name}' -ServerAddress '{self._host}' "
+             f"-TunnelType Pptp -AuthenticationMethod MsChapv2 "
+             f"-EncryptionLevel Optional -SplitTunneling $true -Force"],
+            capture_output=True, text=True, timeout=30,
+        )
+
     def _connect_sync(self) -> bool:
         try:
+            self._ensure_profile()
             result = subprocess.run(
                 ["rasdial", self._name, self._username, self._password],
                 capture_output=True, text=True, timeout=30, encoding="cp949",
