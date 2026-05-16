@@ -4,7 +4,6 @@ import asyncio
 from typing import Any
 
 from utils.logger import get_logger
-from .wireguard import WireGuardAdapter
 
 log = get_logger("vpn.manager")
 
@@ -12,10 +11,33 @@ log = get_logger("vpn.manager")
 class VPNManager:
     def __init__(self, config: dict):
         vpn_cfg = config.get("vpn", {})
-        self._adapter = WireGuardAdapter(
-            config_file=vpn_cfg.get("config_file", "wg0.conf"),
-            interface=vpn_cfg.get("interface", "wg0"),
-        )
+        vpn_type = vpn_cfg.get("type", "wireguard")
+
+        if vpn_type == "ssh":
+            from .ssh_tunnel import SSHTunnel
+            self._adapter = SSHTunnel(
+                host=vpn_cfg.get("host", ""),
+                port=vpn_cfg.get("port", 22),
+                username=vpn_cfg.get("username", ""),
+                password=vpn_cfg.get("password", ""),
+                local_socks_port=vpn_cfg.get("local_socks_port", 9050),
+            )
+        elif vpn_type == "pptp":
+            from .pptp import PPTPAdapter
+            self._adapter = PPTPAdapter(
+                name=vpn_cfg.get("name", "autoproxy-pptp"),
+                host=vpn_cfg.get("host", ""),
+                username=vpn_cfg.get("username", ""),
+                password=vpn_cfg.get("password", ""),
+            )
+        else:
+            from .wireguard import WireGuardAdapter
+            self._adapter = WireGuardAdapter(
+                config_file=vpn_cfg.get("config_file", "wg0.conf"),
+                interface=vpn_cfg.get("interface", "wg0"),
+            )
+
+        self._vpn_type = vpn_type
         self._auto_connect: bool = vpn_cfg.get("auto_connect", True)
         self._health_task: asyncio.Task | None = None
 
@@ -33,6 +55,13 @@ class VPNManager:
             return True
 
         ok = await self._adapter.connect()
+        if ok and self._vpn_type == "ssh":
+            from proxy import tunnel as _tunnel
+            from .ssh_tunnel import SSHTunnel
+            adapter: SSHTunnel = self._adapter  # type: ignore[assignment]
+            _tunnel.upstream_socks5 = ("127.0.0.1", adapter._local_port)
+            log.info(f"Upstream SOCKS5 set to 127.0.0.1:{adapter._local_port}")
+
         if ok:
             self._health_task = asyncio.create_task(self._health_monitor())
         return ok

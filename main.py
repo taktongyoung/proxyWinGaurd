@@ -16,6 +16,18 @@ from utils.logger import get_logger, console
 log = get_logger("main")
 
 
+def _save_allowlist(config_path: str, ips: list[str]) -> None:
+    path = Path(config_path)
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    else:
+        raw = {}
+    raw.setdefault("access_control", {})["allowed_ips"] = sorted(set(ips))
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(raw, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+
 def _load_config(config_path: str) -> dict:
     path = Path(config_path)
     if not path.exists():
@@ -187,14 +199,17 @@ async def _run_proxy(config: dict, with_mcp: bool = False) -> None:
 
 def _print_startup_banner(config: dict, vpn) -> None:
     proxy_cfg = config.get("proxy", {})
+    allowed_ips = config.get("access_control", {}).get("allowed_ips", ["127.0.0.1"])
+
     table = Table(title="AutoProxy Status", show_header=True, header_style="bold cyan")
     table.add_column("Component", style="cyan")
     table.add_column("Value", style="white")
 
-    table.add_row("HTTP Proxy", f"{proxy_cfg.get('host', '0.0.0.0')}:{proxy_cfg.get('port', 8080)}")
-    table.add_row("SOCKS5 Proxy", f"{proxy_cfg.get('host', '0.0.0.0')}:{proxy_cfg.get('socks5_port', 1080)}")
+    table.add_row("HTTP Proxy", f"{proxy_cfg.get('host', '127.0.0.1')}:{proxy_cfg.get('port', 8080)}")
+    table.add_row("SOCKS5 Proxy", f"{proxy_cfg.get('host', '127.0.0.1')}:{proxy_cfg.get('socks5_port', 1080)}")
     table.add_row("VPN Status", "Connected" if vpn.is_connected else "Disconnected")
     table.add_row("VPN IP", vpn.interface_ip or "N/A")
+    table.add_row("Allowed IPs", ", ".join(sorted(set(allowed_ips))) or "ALL")
 
     console.print(Panel(table, border_style="green"))
 
@@ -211,6 +226,7 @@ def _print_startup_banner(config: dict, vpn) -> None:
 def cli(ctx: click.Context, config: str) -> None:
     ctx.ensure_object(dict)
     ctx.obj["config"] = _load_config(config)
+    ctx.obj["config_path"] = config
 
 
 @cli.command()
@@ -329,6 +345,64 @@ def plugin_cmd(ctx: click.Context, action: str, description: str) -> None:
             console.print_json(data=result)
 
         asyncio.run(_generate())
+
+
+@cli.group("ip")
+def ip_cmd() -> None:
+    """Manage allowed client IP addresses."""
+
+
+@ip_cmd.command("list")
+@click.pass_context
+def ip_list(ctx: click.Context) -> None:
+    """List currently allowed IPs."""
+    config = ctx.obj["config"]
+    ips = config.get("access_control", {}).get("allowed_ips", ["127.0.0.1"])
+    table = Table(title="Allowed IPs")
+    table.add_column("#", style="dim")
+    table.add_column("IP Address", style="cyan")
+    for i, ip in enumerate(sorted(set(ips)), 1):
+        table.add_row(str(i), ip)
+    console.print(table)
+
+
+@ip_cmd.command("add")
+@click.argument("ip_address")
+@click.pass_context
+def ip_add(ctx: click.Context, ip_address: str) -> None:
+    """Add an IP address to the allowlist."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(ip_address)
+    except ValueError:
+        console.print(f"[red]Invalid IP address: {ip_address}[/red]")
+        return
+
+    config_path = ctx.obj["config_path"]
+    config = ctx.obj["config"]
+    ips = config.get("access_control", {}).get("allowed_ips", ["127.0.0.1"])
+    if ip_address in ips:
+        console.print(f"[yellow]{ip_address} is already in the allowlist.[/yellow]")
+        return
+    ips.append(ip_address)
+    _save_allowlist(config_path, ips)
+    console.print(f"[green]Added {ip_address} to allowlist.[/green] (restart proxy to apply)")
+
+
+@ip_cmd.command("remove")
+@click.argument("ip_address")
+@click.pass_context
+def ip_remove(ctx: click.Context, ip_address: str) -> None:
+    """Remove an IP address from the allowlist."""
+    config_path = ctx.obj["config_path"]
+    config = ctx.obj["config"]
+    ips = config.get("access_control", {}).get("allowed_ips", ["127.0.0.1"])
+    if ip_address not in ips:
+        console.print(f"[yellow]{ip_address} is not in the allowlist.[/yellow]")
+        return
+    ips.remove(ip_address)
+    _save_allowlist(config_path, ips)
+    console.print(f"[red]Removed {ip_address} from allowlist.[/red] (restart proxy to apply)")
 
 
 if __name__ == "__main__":

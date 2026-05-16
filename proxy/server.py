@@ -15,7 +15,7 @@ _MAX_HEADER_SIZE = 65536
 class ProxyServer:
     def __init__(self, config: dict, plugins: list[ProxyPlugin], vpn_ip: str | None):
         proxy_cfg = config.get("proxy", {})
-        self._host: str = proxy_cfg.get("host", "0.0.0.0")
+        self._host: str = proxy_cfg.get("host", "127.0.0.1")
         self._http_port: int = proxy_cfg.get("port", 8080)
         self._socks5_port: int = proxy_cfg.get("socks5_port", 1080)
         self._auth: dict = proxy_cfg.get("auth", {})
@@ -26,9 +26,30 @@ class ProxyServer:
         self._http_server: asyncio.Server | None = None
         self._socks5_server: asyncio.Server | None = None
 
+        ac = config.get("access_control", {})
+        raw_ips = ac.get("allowed_ips", ["127.0.0.1"])
+        self._allowed_ips: set[str] = set(raw_ips)
+
     @property
     def stats(self) -> ConnectionStats:
         return self._stats
+
+    @property
+    def allowed_ips(self) -> list[str]:
+        return sorted(self._allowed_ips)
+
+    def add_allowed_ip(self, ip: str) -> None:
+        self._allowed_ips.add(ip)
+        log.info(f"Allowed IP added: {ip}")
+
+    def remove_allowed_ip(self, ip: str) -> None:
+        self._allowed_ips.discard(ip)
+        log.info(f"Allowed IP removed: {ip}")
+
+    def _is_allowed(self, ip: str) -> bool:
+        if not self._allowed_ips:
+            return True
+        return ip in self._allowed_ips
 
     def update_vpn_ip(self, ip: str | None) -> None:
         self._vpn_ip = ip
@@ -66,6 +87,13 @@ class ProxyServer:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         try:
+            peer_ip = writer.get_extra_info("peername", ("", 0))[0]
+            if not self._is_allowed(peer_ip):
+                log.warning(f"Blocked HTTP connection from {peer_ip}")
+                writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+                return
+
             raw_head = await reader.read(_MAX_HEADER_SIZE)
             if not raw_head:
                 return
@@ -101,6 +129,11 @@ class ProxyServer:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         try:
+            peer_ip = writer.get_extra_info("peername", ("", 0))[0]
+            if not self._is_allowed(peer_ip):
+                log.warning(f"Blocked SOCKS5 connection from {peer_ip}")
+                return
+
             version_byte = await reader.readexactly(1)
             if version_byte[0] != 0x05:
                 log.debug(f"Non-SOCKS5 byte: {version_byte!r}")

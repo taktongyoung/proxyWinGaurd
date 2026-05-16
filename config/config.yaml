@@ -1,32 +1,35 @@
 proxy:
-  host: "0.0.0.0"
+  host: 127.0.0.1
   port: 8080
   socks5_port: 1080
   auth:
     enabled: false
-    username: ""
-    password: ""
-
+    username: ''
+    password: ''
+access_control:
+  allowed_ips:
+  - 127.0.0.1
 vpn:
-  type: "wireguard"
-  config_file: "wg0.conf"
-  interface: "wg0"
+  type: pptp
+  name: "autoproxy-pptp"
+  host: "183.103.151.104"
+  username: "${VPN_USER}"
+  password: "${VPN_PASS}"
+  interface: "autoproxy-pptp"
   auto_connect: true
-
 ai:
   claude:
-    api_key: "${ANTHROPIC_API_KEY}"
-    model: "claude-sonnet-4-6"
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-sonnet-4-6
     enabled: true
   openai:
-    api_key: "${OPENAI_API_KEY}"
-    model: "gpt-4o"
+    api_key: ${OPENAI_API_KEY}
+    model: gpt-4o
     enabled: true
-
 plugins:
   traffic_logger:
     enabled: true
-    log_file: "logs/traffic.log"
+    log_file: logs/traffic.log
   content_filter:
     enabled: false
     blocked_domains: []
@@ -37,7 +40,6 @@ plugins:
     enabled: true
     max_body_size: 60000
     min_lines: 5
-
 mcp:
   enabled: true
-  transport: "stdio"
+  transport: stdio
